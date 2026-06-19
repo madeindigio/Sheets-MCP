@@ -37,8 +37,8 @@ jobs:
         run: |
           TAG="${{ github.event.release.tag_name }}"
           VERSION="${TAG#v}"
-          echo "📦 Setting version to ${VERSION} in Cargo.toml"
-          sed -i "s/^version = .*/version = \"${VERSION}\"/" Cargo.toml
+          echo "Setting version to ${VERSION} in Cargo.toml"
+          perl -pi -e "s/^version = .*/version = \"${VERSION}\"/" Cargo.toml
           head -5 Cargo.toml
 
       - name: Install Rust toolchain
