@@ -13,13 +13,12 @@
 //! | `update_cell` | [`UpdateCellArgs`] |
 //! | `update_cells` | [`UpdateCellsArgs`] |
 
-use rmcp::handler::server::tool::Parameters;
 use rmcp::{tool, tool_handler, tool_router};
+use rmcp::handler::server::{router::tool::ToolRouter, wrapper::Parameters};
 use rmcp::{ErrorData as McpError, ServerHandler, model::CallToolResult};
 use rmcp::model::Content;
 use rmcp::schemars::JsonSchema;
 use serde::Deserialize;
-use std::future::Future;
 
 use crate::file_source::FileSource;
 use crate::reader;
@@ -34,9 +33,9 @@ use crate::writer;
 ///
 /// Created via [`SheetsServer::new`] and served over stdio in `main.rs`.
 /// Implements [`ServerHandler`] via the rmcp `#[tool_handler]` macro.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct SheetsServer {
-    tool_router: rmcp::handler::server::router::tool::ToolRouter<SheetsServer>,
+    tool_router: ToolRouter<SheetsServer>,
 }
 
 impl SheetsServer {
@@ -48,7 +47,13 @@ impl SheetsServer {
     }
 }
 
-#[tool_handler]
+impl Default for SheetsServer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[tool_handler(router = self.tool_router, name = "sheetsMCP")]
 impl ServerHandler for SheetsServer {}
 
 // ──────────────────────────────────────────────
@@ -133,7 +138,7 @@ pub struct UpdateCellsArgs {
 // Tool implementations
 // ──────────────────────────────────────────────
 
-#[tool_router]
+#[tool_router(router = tool_router)]
 impl SheetsServer {
     #[tool(description = "Returns the structure of a workbook: sheet names, dimensions, and the first N rows with values and formatting (colors, fonts, borders). Use this to understand the spreadsheet layout and identify cells by appearance (e.g., 'the gray cells'). Accepts a file_path or url.")]
     async fn read_structure(
