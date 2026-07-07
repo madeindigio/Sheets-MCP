@@ -43,7 +43,18 @@ pub async fn read_structure(
     first_n_rows: u32,
 ) -> Result<WorkbookStructure, SheetsError> {
     let path = source.resolve().await?;
-    let workbook = read_umya(&path)?;
+    if is_legacy_xls(&path) {
+        return read_structure_legacy_xls(&path, first_n_rows);
+    }
+
+    read_structure_xlsx(&path, first_n_rows)
+}
+
+fn read_structure_xlsx(
+    path: &Path,
+    first_n_rows: u32,
+) -> Result<WorkbookStructure, SheetsError> {
+    let workbook = read_umya(path)?;
 
     let mut sheets = Vec::new();
 
@@ -84,6 +95,67 @@ pub async fn read_structure(
             name: ws.get_name().to_string(),
             total_columns: max_col,
             total_rows: max_row,
+            preview,
+        });
+    }
+
+    Ok(WorkbookStructure { sheets })
+}
+
+fn read_structure_legacy_xls(
+    path: &Path,
+    first_n_rows: u32,
+) -> Result<WorkbookStructure, SheetsError> {
+    let mut workbook = open_calamine(path)?;
+    let mut sheets = Vec::new();
+
+    // Clone names first so we can mutably read each worksheet.
+    let sheet_names: Vec<String> =
+        workbook.sheet_names().to_vec();
+
+    for sheet_name in sheet_names {
+        let range = workbook
+            .worksheet_range(&sheet_name)
+            .map_err(|_e| {
+                let names: Vec<String> = workbook
+                    .sheet_names()
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect();
+                SheetsError::sheet_not_found(&sheet_name, &names)
+            })?;
+
+        let (total_columns, total_rows) = range
+            .end()
+            .map(|(r, c)| (c + 1, r + 1))
+            .unwrap_or((0, 0));
+
+        let mut preview = Vec::new();
+        for row in 1..=first_n_rows.min(total_rows) {
+            let mut row_cells = Vec::new();
+            for col in 0..total_columns {
+                let coord = format!(
+                    "{}{}",
+                    crate::types::col_index_to_letter(col),
+                    row
+                );
+                let value = range
+                    .get_value((row - 1, col))
+                    .map(cell_value_from_calamine)
+                    .unwrap_or(CellValue::Empty);
+                row_cells.push(CellWithFormat {
+                    coordinate: coord,
+                    value,
+                    format: CellFormat::default(),
+                });
+            }
+            preview.push(row_cells);
+        }
+
+        sheets.push(SheetStructure {
+            name: sheet_name,
+            total_columns,
+            total_rows,
             preview,
         });
     }
@@ -160,7 +232,7 @@ pub async fn get_sheet_range(
 ) -> Result<RangeData, SheetsError> {
     let path = source.resolve().await?;
 
-    if include_format {
+    if include_format && !is_legacy_xls(&path) {
         get_range_with_format(&path, sheet_name, range_str).await
     } else {
         get_range_values_only(&path, sheet_name, range_str).await
@@ -295,6 +367,14 @@ fn open_calamine(
 > {
     calamine::open_workbook_auto(path)
         .map_err(|e| SheetsError::Spreadsheet(e.to_string()))
+}
+
+/// Returns true for legacy Excel 97-2003 workbooks (`.xls`).
+fn is_legacy_xls(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("xls"))
+        .unwrap_or(false)
 }
 
 /// Convert a calamine [`Data`](calamine::Data) variant to our [`CellValue`].

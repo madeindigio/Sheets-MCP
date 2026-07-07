@@ -69,6 +69,8 @@ Add to your MCP client config:
 
 Returns sheet names, dimensions, and the first N rows with **values and formatting**.
 
+For `.xls` files, `read_structure` returns **values only**. The `format` field is present but contains default/empty formatting because legacy `.xls` formatting extraction is not supported.
+
 ```
 Input:
   file_path: "/home/user/report.xlsx"   (or: url: "https://...")
@@ -133,6 +135,8 @@ Output:
 ### 3. `get_sheet_range`
 
 Get cell values from a range. Optionally includes formatting.
+
+For `.xls` files, `get_sheet_range` is **values-only**. Formatting metadata is not supported for legacy `.xls` workbooks.
 
 ```
 Input:
