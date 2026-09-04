@@ -55,6 +55,11 @@ pub enum SheetsError {
     /// A required field is missing from the tool input.
     #[error("Missing required field: {0}")]
     MissingField(String),
+
+    /// Shelling out to an external tool (e.g. LibreOffice) for format
+    /// conversion failed, timed out, or the binary was not found.
+    #[error("External conversion failed: {0}")]
+    ExternalConversionFailed(String),
 }
 
 impl SheetsError {

@@ -18,7 +18,7 @@ use std::path::Path;
 
 use crate::error::SheetsError;
 use crate::file_source::FileSource;
-use crate::types::{CellCoordinate, UpdateResult};
+use crate::types::{is_legacy_xls, CellCoordinate, UpdateResult};
 
 // ──────────────────────────────────────────────
 // update_cell
@@ -58,29 +58,32 @@ pub async fn update_cell(
     let input_path = source.resolve().await?;
     let output = source.write_target(output_path)?;
 
-    let mut workbook = read_umya_writable(&input_path)?;
-
-    // Collect sheet names before mutable borrow.
-    let sheet_names: Vec<String> = workbook
-        .get_sheet_collection()
-        .iter()
-        .map(|s| s.get_name().to_string())
-        .collect();
-
-    // Get mutable sheet.
-    let sheet = workbook
-        .get_sheet_by_name_mut(sheet_name)
-        .ok_or_else(|| SheetsError::sheet_not_found(sheet_name, &sheet_names))?;
-
-    // Get mutable cell and set value.
     let coord: CellCoordinate = coordinate.parse()?;
     let cell_ref = coord.to_string();
-    let cell = sheet.get_cell_mut(cell_ref.as_str());
 
-    set_cell_value(cell, value, value_type)?;
+    with_xlsx_roundtrip(&input_path, &output, |xlsx_in, xlsx_out| {
+        let mut workbook = read_umya_writable(xlsx_in)?;
 
-    // Write back.
-    write_umya(&workbook, &output)?;
+        // Collect sheet names before mutable borrow.
+        let sheet_names: Vec<String> = workbook
+            .get_sheet_collection()
+            .iter()
+            .map(|s| s.get_name().to_string())
+            .collect();
+
+        // Get mutable sheet.
+        let sheet = workbook
+            .get_sheet_by_name_mut(sheet_name)
+            .ok_or_else(|| SheetsError::sheet_not_found(sheet_name, &sheet_names))?;
+
+        // Get mutable cell and set value.
+        let cell = sheet.get_cell_mut(cell_ref.as_str());
+        set_cell_value(cell, value, value_type)?;
+
+        // Write back.
+        write_umya(&workbook, xlsx_out)
+    })
+    .await?;
 
     tracing::info!(
         "update_cell: set {} = {} ({}) in '{}' → {:?}",
@@ -137,45 +140,48 @@ pub async fn update_cells(
     let input_path = source.resolve().await?;
     let output = source.write_target(output_path)?;
 
-    let mut workbook = read_umya_writable(&input_path)?;
-
-    // Collect sheet names before mutable borrow.
-    let sheet_names: Vec<String> = workbook
-        .get_sheet_collection()
-        .iter()
-        .map(|s| s.get_name().to_string())
-        .collect();
-
-    // Get mutable sheet.
-    let sheet = workbook
-        .get_sheet_by_name_mut(sheet_name)
-        .ok_or_else(|| SheetsError::sheet_not_found(sheet_name, &sheet_names))?;
-
     // Parse destination coordinate.
     let start: CellCoordinate = destination.parse()?;
     let start_col = start.column_index;
     let start_row = start.row;
 
-    let mut written: u32 = 0;
     let num_rows = data.len() as u32;
     let num_cols = data.iter().map(|r| r.len() as u32).max().unwrap_or(0);
+    let mut written: u32 = 0;
 
-    for (r, row_data) in data.iter().enumerate() {
-        for (c, value_str) in row_data.iter().enumerate() {
-            let coord =
-                CellCoordinate::from_index(start_col + c as u32, start_row + r as u32);
-            let cell_ref = coord.to_string();
-            let cell = sheet.get_cell_mut(cell_ref.as_str());
+    with_xlsx_roundtrip(&input_path, &output, |xlsx_in, xlsx_out| {
+        let mut workbook = read_umya_writable(xlsx_in)?;
 
-            // All values from data are treated as strings (raw paste).
-            // If the value is empty, we still set it (clears the cell value).
-            cell.set_value(value_str.as_str());
-            written += 1;
+        // Collect sheet names before mutable borrow.
+        let sheet_names: Vec<String> = workbook
+            .get_sheet_collection()
+            .iter()
+            .map(|s| s.get_name().to_string())
+            .collect();
+
+        // Get mutable sheet.
+        let sheet = workbook
+            .get_sheet_by_name_mut(sheet_name)
+            .ok_or_else(|| SheetsError::sheet_not_found(sheet_name, &sheet_names))?;
+
+        for (r, row_data) in data.iter().enumerate() {
+            for (c, value_str) in row_data.iter().enumerate() {
+                let coord =
+                    CellCoordinate::from_index(start_col + c as u32, start_row + r as u32);
+                let cell_ref = coord.to_string();
+                let cell = sheet.get_cell_mut(cell_ref.as_str());
+
+                // All values from data are treated as strings (raw paste).
+                // If the value is empty, we still set it (clears the cell value).
+                cell.set_value(value_str.as_str());
+                written += 1;
+            }
         }
-    }
 
-    // Write back.
-    write_umya(&workbook, &output)?;
+        // Write back.
+        write_umya(&workbook, xlsx_out)
+    })
+    .await?;
 
     tracing::info!(
         "update_cells: pasted {}x{} at {} in '{}' → {:?}",
@@ -195,6 +201,202 @@ pub async fn update_cells(
 // ──────────────────────────────────────────────
 // Helpers
 // ──────────────────────────────────────────────
+
+/// Runs `f` against a working `.xlsx` pair, transparently round-tripping
+/// through LibreOffice when `input_path` is a legacy `.xls` file.
+///
+/// - `.xlsx` input: `f` is called directly with `(input_path, output_path)`.
+/// - `.xls` input: `input_path` is converted to a temporary `.xlsx` via
+///   `soffice`, `f` is called against that temp file (read and write to the
+///   same path), and the result is converted back to `.xls` and copied to
+///   `output_path`. Temp files are cleaned up in all cases.
+///
+/// `f` performs the actual umya read-modify-write and must not assume
+/// anything about the final output format.
+async fn with_xlsx_roundtrip<F>(
+    input_path: &Path,
+    output_path: &Path,
+    f: F,
+) -> Result<(), SheetsError>
+where
+    F: FnOnce(&Path, &Path) -> Result<(), SheetsError>,
+{
+    if !is_legacy_xls(input_path) {
+        return f(input_path, output_path);
+    }
+
+    let (temp_dir, xlsx_path) = convert_xls_to_xlsx(input_path).await?;
+
+    let result = f(&xlsx_path, &xlsx_path);
+    let final_result = match result {
+        Ok(()) => convert_xlsx_to_xls(&xlsx_path, output_path).await,
+        Err(e) => Err(e),
+    };
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+
+    final_result
+}
+
+/// A unique, filesystem-safe suffix for temp dirs / LibreOffice profiles.
+///
+/// Avoids collisions between concurrent MCP tool calls without pulling in
+/// a `uuid` dependency.
+fn unique_suffix() -> String {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("{}_{}", std::process::id(), nanos)
+}
+
+/// Converts a legacy `.xls` file to `.xlsx` via a headless LibreOffice
+/// subprocess, returning `(temp_dir, xlsx_path)`. The caller is responsible
+/// for removing `temp_dir` once done.
+async fn convert_xls_to_xlsx(
+    xls_path: &Path,
+) -> Result<(std::path::PathBuf, std::path::PathBuf), SheetsError> {
+    let suffix = unique_suffix();
+    let temp_dir = std::env::temp_dir().join(format!("sheets_mcp_lo_{suffix}"));
+    let profile_dir =
+        std::env::temp_dir().join(format!("sheets_mcp_lo_profile_{suffix}"));
+    std::fs::create_dir_all(&temp_dir)?;
+
+    let stem = xls_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("workbook");
+    let input_copy = temp_dir.join(format!("{stem}.xls"));
+    std::fs::copy(xls_path, &input_copy)?;
+
+    let result = run_soffice(&[
+        "--headless".to_string(),
+        format!("-env:UserInstallation=file://{}", profile_dir.display()),
+        "--convert-to".to_string(),
+        "xlsx".to_string(),
+        "--outdir".to_string(),
+        temp_dir.display().to_string(),
+        input_copy.display().to_string(),
+    ])
+    .await;
+
+    let _ = std::fs::remove_dir_all(&profile_dir);
+
+    if let Err(e) = result {
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        return Err(e);
+    }
+
+    let xlsx_path = temp_dir.join(format!("{stem}.xlsx"));
+    if !xlsx_path.exists() {
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        return Err(SheetsError::ExternalConversionFailed(
+            "soffice did not produce the expected .xlsx output".to_string(),
+        ));
+    }
+
+    Ok((temp_dir, xlsx_path))
+}
+
+/// Converts an `.xlsx` file back to legacy `.xls` via a headless
+/// LibreOffice subprocess and copies the result to `final_output`.
+async fn convert_xlsx_to_xls(
+    xlsx_path: &Path,
+    final_output: &Path,
+) -> Result<(), SheetsError> {
+    let suffix = unique_suffix();
+    let temp_dir = std::env::temp_dir().join(format!("sheets_mcp_lo_out_{suffix}"));
+    let profile_dir =
+        std::env::temp_dir().join(format!("sheets_mcp_lo_profile_{suffix}"));
+    std::fs::create_dir_all(&temp_dir)?;
+
+    let stem = xlsx_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("workbook");
+
+    let result = run_soffice(&[
+        "--headless".to_string(),
+        format!("-env:UserInstallation=file://{}", profile_dir.display()),
+        "--convert-to".to_string(),
+        "xls:MS Excel 97".to_string(),
+        "--outdir".to_string(),
+        temp_dir.display().to_string(),
+        xlsx_path.display().to_string(),
+    ])
+    .await;
+
+    let _ = std::fs::remove_dir_all(&profile_dir);
+
+    if let Err(e) = result {
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        return Err(e);
+    }
+
+    let converted_xls = temp_dir.join(format!("{stem}.xls"));
+    if !converted_xls.exists() {
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        return Err(SheetsError::ExternalConversionFailed(
+            "soffice did not produce the expected .xls output".to_string(),
+        ));
+    }
+
+    if let Some(parent) = final_output.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::copy(&converted_xls, final_output)?;
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+    Ok(())
+}
+
+/// Runs `soffice` with the given arguments, enforcing a 30s timeout and
+/// mapping spawn/timeout/non-zero-exit failures to
+/// [`SheetsError::ExternalConversionFailed`] with an actionable message.
+async fn run_soffice(args: &[String]) -> Result<(), SheetsError> {
+    run_soffice_bin("soffice", args).await
+}
+
+/// Same as [`run_soffice`] but with an injectable binary name, so tests can
+/// exercise the "LibreOffice not installed" path without mutating the
+/// process-wide `PATH`.
+async fn run_soffice_bin(bin: &str, args: &[String]) -> Result<(), SheetsError> {
+    let spawn = tokio::process::Command::new(bin)
+        .args(args)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .output();
+
+    let output = match tokio::time::timeout(std::time::Duration::from_secs(30), spawn).await {
+        Err(_) => {
+            return Err(SheetsError::ExternalConversionFailed(
+                "LibreOffice (soffice) conversion timed out after 30s".to_string(),
+            ))
+        }
+        Ok(Err(e)) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err(SheetsError::ExternalConversionFailed(
+                "Writing legacy .xls requires LibreOffice (`soffice`) to be installed and on PATH"
+                    .to_string(),
+            ))
+        }
+        Ok(Err(e)) => {
+            return Err(SheetsError::ExternalConversionFailed(format!(
+                "failed to run soffice: {e}"
+            )))
+        }
+        Ok(Ok(output)) => output,
+    };
+
+    if !output.status.success() {
+        return Err(SheetsError::ExternalConversionFailed(format!(
+            "soffice exited with {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        )));
+    }
+
+    Ok(())
+}
 
 /// Read an `.xlsx` file using umya-spreadsheet for writing.
 ///
@@ -221,6 +423,7 @@ fn write_umya(
     umya_spreadsheet::writer::xlsx::write(workbook, path)
         .map_err(|e| SheetsError::Spreadsheet(e.to_string()))
 }
+
 
 /// Set a cell value based on the declared type.
 ///
@@ -459,5 +662,24 @@ mod tests {
 
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), SheetsError::FileNotFound(_)));
+    }
+
+    #[test]
+    fn test_run_soffice_missing_binary_errors_clearly() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let result = rt.block_on(run_soffice_bin(
+            "sheets_mcp_definitely_not_a_real_binary_xyz",
+            &[],
+        ));
+
+        match result {
+            Err(SheetsError::ExternalConversionFailed(msg)) => {
+                assert!(
+                    msg.contains("LibreOffice") && msg.contains("PATH"),
+                    "expected an actionable message, got: {msg}"
+                );
+            }
+            other => panic!("expected ExternalConversionFailed, got: {other:?}"),
+        }
     }
 }

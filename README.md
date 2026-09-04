@@ -15,7 +15,14 @@ A high-performance MCP server for reading and writing Excel spreadsheets, built 
 | Format | Read | Write | Formatting |
 |--------|------|-------|------------|
 | `.xlsx` | ✅ | ✅ | ✅ |
-| `.xls` | ✅ (values only) | ❌ | ❌ |
+| `.xls` | ✅ (values only) | ✅ (via LibreOffice round-trip, requires `soffice` on `PATH`) | ⚠️ best-effort |
+
+Writing to legacy `.xls` files requires **LibreOffice** to be installed and
+available as `soffice` on `PATH` (e.g. `apt install libreoffice-calc` or
+`brew install --cask libreoffice`). The `.xls` is transparently converted to
+`.xlsx`, edited, and converted back — no manual conversion is needed on the
+client side. If `soffice` is missing, `update_cell`/`update_cells` return a
+clear error instead of failing on `.xlsx`-only reads/writes.
 
 ## Installation
 
@@ -28,6 +35,12 @@ cargo build --release
 ```
 
 Binary at: `./target/release/sheets_mcp`
+
+Optional (only needed to write legacy `.xls` files):
+
+```bash
+sudo apt install libreoffice-calc   # Debian/Ubuntu
+```
 
 ### From crates.io (future)
 
@@ -313,12 +326,13 @@ URLs are downloaded and cached in `$TMPDIR/sheets_mcp/`. Repeated reads are inst
 | `get_sheet_range` (with format) | ~10K cells/sec | umya-spreadsheet DOM |
 | `update_cell` | ~10ms | DOM load + save |
 | `update_cells` | ~10ms + ~1μs/cell | DOM load + save |
+| `update_cell`/`update_cells` on `.xls` | ~1-2s | LibreOffice headless round-trip |
 
 Memory footprint: ~8-12MB idle.
 
 ## Known Limitations
 
-- `.xls` files: read-only, no formatting support
+- `.xls` files: no formatting support on read; writes round-trip through LibreOffice (`soffice` required on `PATH`) and may occasionally alter styling
 - `.xlsx` files with macros (`.xlsm`): not supported
 - Very large files (>100MB): umya-spreadsheet loads entire DOM into memory — use `count_sheet_rows` first to check size
 - URL cache has no TTL — delete `$TMPDIR/sheets_mcp/` manually to force re-download

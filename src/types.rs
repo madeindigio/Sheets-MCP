@@ -128,6 +128,14 @@ pub fn col_index_to_letter(index: u32) -> String {
     result.chars().rev().collect()
 }
 
+/// Returns true for legacy Excel 97-2003 workbooks (`.xls`).
+pub(crate) fn is_legacy_xls(path: &std::path::Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("xls"))
+        .unwrap_or(false)
+}
+
 /// Convert Excel-style column letters to zero-based index.
 /// "A"→0, "Z"→25, "AA"→26, etc.
 fn letter_to_col_index(s: &str) -> Result<u32, SheetsError> {

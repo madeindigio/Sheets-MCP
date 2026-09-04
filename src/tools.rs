@@ -68,11 +68,23 @@ pub struct ReadStructureArgs {
     pub source: FileSource,
     /// Number of preview rows per sheet (default: 10).
     #[serde(default = "default_first_n_rows")]
+    #[schemars(schema_with = "first_n_rows_schema")]
     pub first_n_rows: u32,
 }
 
 fn default_first_n_rows() -> u32 {
     10
+}
+
+fn first_n_rows_schema(
+    _: &mut rmcp::schemars::SchemaGenerator,
+) -> rmcp::schemars::Schema {
+    // Emit a plain non-negative integer schema to avoid client warnings
+    // about unknown integer formats like "uint32".
+    rmcp::schemars::json_schema!({
+        "type": "integer",
+        "minimum": 0
+    })
 }
 
 /// Arguments for the `count_sheet_rows` tool.

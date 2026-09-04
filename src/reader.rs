@@ -16,7 +16,7 @@ use calamine::Reader as _;
 use crate::error::SheetsError;
 use crate::file_source::FileSource;
 use crate::types::{
-    argb_to_hex, CellFormat, CellValue, CellWithFormat,
+    argb_to_hex, is_legacy_xls, CellFormat, CellValue, CellWithFormat,
     RangeCell, RangeData, RowCount, SheetStructure,
     WorkbookStructure,
 };
@@ -369,14 +369,6 @@ fn open_calamine(
         .map_err(|e| SheetsError::Spreadsheet(e.to_string()))
 }
 
-/// Returns true for legacy Excel 97-2003 workbooks (`.xls`).
-fn is_legacy_xls(path: &Path) -> bool {
-    path.extension()
-        .and_then(|ext| ext.to_str())
-        .map(|ext| ext.eq_ignore_ascii_case("xls"))
-        .unwrap_or(false)
-}
-
 /// Convert a calamine [`Data`](calamine::Data) variant to our [`CellValue`].
 ///
 /// Maps: `Int`/`Float` → `Number`, `String` → `String`, `Bool` → `Bool`,
@@ -405,22 +397,44 @@ fn cell_value_from_calamine(data: &calamine::Data) -> CellValue {
 fn cell_value_from_umya(
     cell: &umya_spreadsheet::structs::Cell,
 ) -> CellValue {
-    let raw = cell.get_value().to_string();
-    if raw.is_empty() {
-        return CellValue::Empty;
+    use umya_spreadsheet::structs::CellRawValue;
+
+    match cell.get_raw_value() {
+        CellRawValue::Numeric(n) => CellValue::Number(*n),
+        CellRawValue::Bool(b) => CellValue::Bool(*b),
+        CellRawValue::Error(e) => CellValue::Error(e.to_string()),
+        CellRawValue::String(s) => {
+            if s.is_empty() {
+                CellValue::Empty
+            } else {
+                CellValue::String(s.to_string())
+            }
+        }
+        CellRawValue::RichText(rt) => {
+            let text = rt.get_text();
+            if text.is_empty() {
+                CellValue::Empty
+            } else {
+                CellValue::String(text.to_string())
+            }
+        }
+        CellRawValue::Lazy(s) => {
+            // Lazy values are string-like buffers. Keep compatibility with
+            // previous behavior by attempting number/bool parsing.
+            if s.is_empty() {
+                CellValue::Empty
+            } else if let Ok(n) = s.parse::<f64>() {
+                CellValue::Number(n)
+            } else if s.eq_ignore_ascii_case("true") {
+                CellValue::Bool(true)
+            } else if s.eq_ignore_ascii_case("false") {
+                CellValue::Bool(false)
+            } else {
+                CellValue::String(s.to_string())
+            }
+        }
+        CellRawValue::Empty => CellValue::Empty,
     }
-    // Try parsing as number.
-    if let Ok(n) = raw.parse::<f64>() {
-        return CellValue::Number(n);
-    }
-    // Try parsing as bool.
-    if raw.eq_ignore_ascii_case("true") {
-        return CellValue::Bool(true);
-    }
-    if raw.eq_ignore_ascii_case("false") {
-        return CellValue::Bool(false);
-    }
-    CellValue::String(raw)
 }
 
 /// Extract visual formatting from an umya-spreadsheet cell.
@@ -737,6 +751,28 @@ mod tests {
         path
     }
 
+    /// Create a workbook where numeric cells have integer display format.
+    /// Raw values should still preserve decimal fractions.
+    fn create_decimal_formatted_file(name: &str) -> std::path::PathBuf {
+        let mut book = new_file();
+        let ws = book.get_sheet_mut(&0).unwrap();
+
+        ws.get_cell_mut("A1").set_value("Decimal");
+
+        let numeric = ws.get_cell_mut("A2");
+        numeric.set_value_number(12.75);
+        numeric
+            .get_style_mut()
+            .get_number_format_mut()
+            .set_format_code("0");
+
+        let dir = std::env::temp_dir().join("sheets_mcp_tests");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(format!("{name}.xlsx"));
+        umya_spreadsheet::writer::xlsx::write(&book, &path).unwrap();
+        path
+    }
+
     #[tokio::test]
     async fn read_structure_returns_formatting() {
         let path = create_formatted_test_file("format_test");
@@ -789,5 +825,38 @@ mod tests {
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
         assert!(err_msg.contains("Sheet1"), "Error should list available sheets: {err_msg}");
+    }
+
+    #[tokio::test]
+    async fn get_range_with_format_keeps_decimal_raw_value() {
+        let path = create_decimal_formatted_file("decimal_format_range");
+        let source = FileSource::Path {
+            file_path: path.to_string_lossy().to_string(),
+        };
+
+        let result =
+            get_sheet_range(&source, "Sheet1", "A2:A2", true).await.unwrap();
+
+        assert_eq!(
+            result.rows[0][0].value,
+            CellValue::Number(12.75),
+            "Decimal fraction should be preserved even when number format is '0'"
+        );
+    }
+
+    #[tokio::test]
+    async fn read_structure_keeps_decimal_raw_value() {
+        let path = create_decimal_formatted_file("decimal_format_structure");
+        let source = FileSource::Path {
+            file_path: path.to_string_lossy().to_string(),
+        };
+
+        let result = read_structure(&source, 2).await.unwrap();
+
+        assert_eq!(
+            result.sheets[0].preview[1][0].value,
+            CellValue::Number(12.75),
+            "read_structure should return raw numeric value with decimals"
+        );
     }
 }
