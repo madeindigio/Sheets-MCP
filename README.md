@@ -36,6 +36,28 @@ cargo build --release
 
 Binary at: `./target/release/sheets_mcp`
 
+### Static Linux build (musl)
+
+Works on any Linux distro regardless of glibc version (Alpine, old CentOS, distroless):
+
+```bash
+sudo apt install musl-tools musl-dev   # Debian/Ubuntu
+rustup target add x86_64-unknown-linux-musl
+CC_x86_64_unknown_linux_musl=musl-gcc cargo build --release --target x86_64-unknown-linux-musl
+```
+
+Binary at: `./target/x86_64-unknown-linux-musl/release/sheets_mcp`
+
+Verify it is fully static:
+
+```bash
+file target/x86_64-unknown-linux-musl/release/sheets_mcp   # "statically linked"
+ldd  target/x86_64-unknown-linux-musl/release/sheets_mcp   # "not a dynamic executable"
+```
+
+Prebuilt `sheets_mcp-x86_64-unknown-linux-musl.tar.gz` and
+`sheets_mcp-aarch64-unknown-linux-musl.tar.gz` assets are published with each release.
+
 Optional (only needed to write legacy `.xls` files):
 
 ```bash
