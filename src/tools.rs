@@ -140,8 +140,9 @@ pub struct UpdateCellsArgs {
     pub sheet_name: String,
     /// Top-left destination cell (e.g. `"B2"`).
     pub destination: String,
-    /// 2D array of string values (row-major).
-    pub data: Vec<Vec<String>>,
+    /// 2D array of values (row-major): strings, numbers, typed values
+    /// `{ "t": "s"|"n"|"b", "v": … }`, or null to leave a cell untouched.
+    pub data: Vec<Vec<crate::types::CellInput>>,
     /// Output path (required when source is a URL).
     pub output_path: Option<String>,
 }

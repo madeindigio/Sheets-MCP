@@ -158,6 +158,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "138646b9af2c5d7f1804ea4bf93afc597737d2bd4f7341d67c48b03316976eb1"
 dependencies = [
  "byteorder",
+ "chrono",
  "codepage",
  "encoding_rs",
  "log",
@@ -215,8 +216,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327"
 dependencies = [
  "iana-time-zone",
+ "js-sys",
  "num-traits",
  "serde",
+ "wasm-bindgen",
  "windows-link",
 ]
 
@@ -1508,10 +1511,11 @@ dependencies = [
 
 [[package]]
 name = "sheets_mcp"
-version = "1.0.3"
+version = "1.2.0"
 dependencies = [
  "anyhow",
  "calamine",
+ "chrono",
  "reqwest",
  "rmcp",
  "schemars",

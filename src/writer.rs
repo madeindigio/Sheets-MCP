@@ -124,12 +124,44 @@ pub async fn update_cell(
 /// - [`SheetsError::MissingField`] if `data` is empty
 /// - [`SheetsError::SheetNotFound`] if sheet_name doesn't exist
 /// - [`SheetsError::InvalidCoordinate`] if destination can't be parsed
+/// Write one [`CellInput`](crate::types::CellInput) into a cell.
+fn apply_cell_input(cell: &mut umya_spreadsheet::Cell, input: &crate::types::CellInput) {
+    use crate::types::CellInput;
+    match input {
+        // Legacy: raw paste (umya infers numbers from numeric-looking text).
+        CellInput::Text(value) => {
+            cell.set_value(value.as_str());
+        }
+        CellInput::Number(value) => {
+            cell.set_value_number(*value);
+        }
+        CellInput::Typed { t, v } => match (t.as_str(), v) {
+            ("n", serde_json::Value::Number(number)) => {
+                cell.set_value_number(number.as_f64().unwrap_or(0.0));
+            }
+            ("b", serde_json::Value::Bool(flag)) => {
+                cell.set_value_bool(*flag);
+            }
+            (_, serde_json::Value::String(text)) => {
+                cell.set_value_string(text.as_str());
+            }
+            (_, serde_json::Value::Null) => {
+                cell.set_value_string("");
+            }
+            (_, other) => {
+                cell.set_value_string(other.to_string());
+            }
+        },
+        CellInput::Skip(()) => {}
+    }
+}
+
 pub async fn update_cells(
     source: &FileSource,
     output_path: Option<&str>,
     sheet_name: &str,
     destination: &str,
-    data: &[Vec<String>],
+    data: &[Vec<crate::types::CellInput>],
 ) -> Result<UpdateResult, SheetsError> {
     if data.is_empty() {
         return Err(SheetsError::MissingField(
@@ -165,15 +197,15 @@ pub async fn update_cells(
             .ok_or_else(|| SheetsError::sheet_not_found(sheet_name, &sheet_names))?;
 
         for (r, row_data) in data.iter().enumerate() {
-            for (c, value_str) in row_data.iter().enumerate() {
+            for (c, input) in row_data.iter().enumerate() {
+                if matches!(input, crate::types::CellInput::Skip(())) {
+                    continue;
+                }
                 let coord =
                     CellCoordinate::from_index(start_col + c as u32, start_row + r as u32);
                 let cell_ref = coord.to_string();
                 let cell = sheet.get_cell_mut(cell_ref.as_str());
-
-                // All values from data are treated as strings (raw paste).
-                // If the value is empty, we still set it (clears the cell value).
-                cell.set_value(value_str.as_str());
+                apply_cell_input(cell, input);
                 written += 1;
             }
         }
@@ -492,6 +524,36 @@ mod tests {
     }
 
     #[test]
+    fn test_update_cells_typed_values() {
+        use crate::types::CellInput;
+        let dir = std::env::temp_dir().join("sheets_mcp_test");
+        let path = dir.join("test_update_cells_typed.xlsx");
+        create_test_workbook(&path);
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let source = FileSource::Path {
+            file_path: path.display().to_string(),
+        };
+        let data: Vec<Vec<CellInput>> = serde_json::from_str(
+            r#"[[{"t":"s","v":"098"}, 2767.77, null], ["21", {"t":"n","v":5}, null]]"#,
+        )
+        .unwrap();
+
+        let result = rt
+            .block_on(update_cells(&source, None, "Sheet1", "A1", &data))
+            .unwrap();
+        assert_eq!(result.updated_count, 4);
+
+        let wb = umya_spreadsheet::reader::xlsx::read(&path).unwrap();
+        let sheet = wb.get_sheet_by_name("Sheet1").unwrap();
+        assert_eq!(sheet.get_cell("A1").unwrap().get_value(), "098");
+        assert_eq!(sheet.get_cell("A1").unwrap().get_data_type(), "s");
+        assert_eq!(sheet.get_cell("B1").unwrap().get_value(), "2767.77");
+        assert_eq!(sheet.get_cell("B2").unwrap().get_value(), "5");
+        // null leaves the formula untouched
+        assert_eq!(sheet.get_cell("C1").unwrap().get_value(), "=A1+B1");
+    }
+
+    #[test]
     fn test_update_cell_number() {
         let dir = std::env::temp_dir().join("sheets_mcp_test");
         let path = dir.join("test_update_cell.xlsx");
@@ -560,9 +622,9 @@ mod tests {
             file_path: path.display().to_string(),
         };
 
-        let data = vec![
-            vec!["x".to_string(), "y".to_string()],
-            vec!["z".to_string(), "w".to_string()],
+        let data: Vec<Vec<crate::types::CellInput>> = vec![
+            vec!["x".into(), "y".into()],
+            vec!["z".into(), "w".into()],
         ];
 
         let result = rt.block_on(update_cells(

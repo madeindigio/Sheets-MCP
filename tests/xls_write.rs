@@ -100,7 +100,7 @@ async fn update_cells_roundtrips_legacy_xls() {
     let path = create_legacy_xls_fixture("xls_update_cells");
     let src = source(&path);
 
-    let data = vec![vec!["X".to_string(), "Y".to_string()]];
+    let data: Vec<Vec<sheets_mcp::types::CellInput>> = vec![vec!["X".into(), "Y".into()]];
     let result = update_cells(&src, None, "Sheet1", "A3", &data)
         .await
         .unwrap();

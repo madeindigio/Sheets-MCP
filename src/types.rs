@@ -9,6 +9,7 @@
 //! - **Cell coordinate**: e.g. `A1`, `AA42`
 //! - **Cell range**: e.g. `A1:B10`, `Sheet1!A1:Z100`
 
+use rmcp::schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
@@ -239,6 +240,8 @@ impl fmt::Display for CellRange {
 /// - `{ "type": "Number", "value": 42.0 }`
 /// - `{ "type": "String", "value": "hello" }`
 /// - `{ "type": "Error", "value": "#REF!" }`
+/// - `{ "type": "DateTime", "value": "2023-10-10" }` (ISO 8601; date-only
+///   when the time part is midnight)
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "value")]
 pub enum CellValue {
@@ -252,6 +255,8 @@ pub enum CellValue {
     String(String),
     /// Excel error (e.g. `#REF!`, `#N/A`).
     Error(String),
+    /// Date/time cell (date-typed or date-formatted), as ISO 8601 text.
+    DateTime(String),
 }
 
 // ──────────────────────────────────────────────
@@ -589,5 +594,47 @@ mod tests {
         assert!(!f.has_border);
         assert!(f.background_color.is_none());
         assert!(f.font_color.is_none());
+    }
+}
+
+// ──────────────────────────────────────────────
+// CellInput (update_cells)
+// ──────────────────────────────────────────────
+
+/// One value for `update_cells`.
+///
+/// - a JSON string: legacy behaviour (`set_value`, numeric-looking text is
+///   stored as a number);
+/// - a JSON number: numeric cell;
+/// - `{ "t": "s" | "n" | "b", "v": … }`: explicit type (`"s"` keeps text such
+///   as `"098"` with its leading zero);
+/// - `null`: the cell is left untouched (formulas and styles survive).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum CellInput {
+    /// Explicitly typed value.
+    Typed {
+        /// Type: `"s"` string, `"n"` number, `"b"` boolean.
+        t: String,
+        /// Value.
+        v: serde_json::Value,
+    },
+    /// Legacy string value.
+    Text(String),
+    /// Numeric value.
+    Number(f64),
+    /// Leave the cell untouched.
+    Skip(()),
+}
+
+impl From<&str> for CellInput {
+    fn from(value: &str) -> Self {
+        CellInput::Text(value.to_string())
+    }
+}
+
+impl From<String> for CellInput {
+    fn from(value: String) -> Self {
+        CellInput::Text(value)
     }
 }

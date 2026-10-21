@@ -124,10 +124,10 @@ async fn update_cells_pastes_2d_array() {
     let path = create_full_workbook("intg_array_paste");
     let src = source(&path);
 
-    let data = vec![
-        vec!["X".to_string(), "100".to_string()],
-        vec!["Y".to_string(), "200".to_string()],
-        vec!["Z".to_string(), "300".to_string()],
+    let data: Vec<Vec<sheets_mcp::types::CellInput>> = vec![
+        vec!["X".into(), "100".into()],
+        vec!["Y".into(), "200".into()],
+        vec!["Z".into(), "300".into()],
     ];
 
     let result = update_cells(&src, None, "Sheet1", "E2", &data)
@@ -166,10 +166,8 @@ async fn update_cells_preserves_formulas_in_range() {
     let src = source(&path);
 
     // Paste values into B2:B3 (overwriting numeric cells, but C2:C3 have formulas).
-    let data = vec![
-        vec!["5".to_string()],
-        vec!["95".to_string()],
-    ];
+    let data: Vec<Vec<sheets_mcp::types::CellInput>> =
+        vec![vec!["5".into()], vec!["95".into()]];
     update_cells(&src, None, "Sheet1", "B2", &data)
         .await
         .unwrap();

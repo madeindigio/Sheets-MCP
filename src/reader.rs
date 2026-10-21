@@ -381,12 +381,26 @@ fn cell_value_from_calamine(data: &calamine::Data) -> CellValue {
         Data::String(s) => CellValue::String(s.clone()),
         Data::Bool(b) => CellValue::Bool(*b),
         Data::Error(e) => CellValue::Error(format!("{:?}", e)),
-        Data::DateTime(dt) => {
-            CellValue::String(dt.to_string())
-        }
+        Data::DateTime(dt) => excel_datetime_to_cell_value(dt),
         Data::DateTimeIso(s) => CellValue::String(s.clone()),
         Data::DurationIso(s) => CellValue::String(s.clone()),
         Data::Empty => CellValue::Empty,
+    }
+}
+
+/// Convert a calamine date cell to ISO 8601 (`2023-10-10`, or
+/// `2023-10-10T14:30:00` when it has a time part). Durations and values that
+/// cannot be converted keep their raw serial number.
+fn excel_datetime_to_cell_value(dt: &calamine::ExcelDateTime) -> CellValue {
+    if !dt.is_datetime() {
+        return CellValue::Number(dt.as_f64());
+    }
+    match dt.as_datetime() {
+        Some(value) if value.time() == chrono::NaiveTime::MIN => {
+            CellValue::DateTime(value.date().format("%Y-%m-%d").to_string())
+        }
+        Some(value) => CellValue::DateTime(value.format("%Y-%m-%dT%H:%M:%S").to_string()),
+        None => CellValue::Number(dt.as_f64()),
     }
 }
 
@@ -530,6 +544,29 @@ fn parse_argb_u32(s: &str) -> u32 {
 
 #[cfg(test)]
 mod tests {
+
+#[test]
+fn excel_datetime_serial_becomes_iso_date() {
+    let date = calamine::ExcelDateTime::new(
+        45209.0,
+        calamine::ExcelDateTimeType::DateTime,
+        false,
+    );
+    assert_eq!(
+        super::excel_datetime_to_cell_value(&date),
+        crate::types::CellValue::DateTime("2023-10-10".to_string())
+    );
+    let with_time = calamine::ExcelDateTime::new(
+        46092.5,
+        calamine::ExcelDateTimeType::DateTime,
+        false,
+    );
+    assert_eq!(
+        super::excel_datetime_to_cell_value(&with_time),
+        crate::types::CellValue::DateTime("2026-03-11T12:00:00".to_string())
+    );
+}
+
     use super::*;
     use crate::file_source::FileSource;
     use umya_spreadsheet::new_file;
