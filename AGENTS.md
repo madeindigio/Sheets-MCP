@@ -74,7 +74,7 @@ src/
 - All functions are `async` (for FileSource::resolve).
 - `read_structure(source, first_n_rows)`: Uses umya-spreadsheet. Returns sheets with dimensions + preview rows with CellWithFormat.
 - `count_sheet_rows(source, sheet_name)`: Uses calamine. Fast metadata read.
-- `get_sheet_range(source, sheet_name, range, include_format)`: Dispatches to calamine or umya based on `include_format`.
+- MCP `get_sheet_range` accepts optional `include_format` and `include_formula` flags. It uses calamine for values only and umya when formatting or formula metadata is requested; formulas are available for `.xlsx` only. The Rust `get_sheet_range` helper remains source-compatible, while `get_sheet_range_with_options` accepts the new formula flag.
 
 ### `writer.rs`
 - All functions are `async` (for FileSource::resolve + write_target).

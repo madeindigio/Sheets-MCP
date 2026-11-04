@@ -166,8 +166,7 @@ async fn update_cells_preserves_formulas_in_range() {
     let src = source(&path);
 
     // Paste values into B2:B3 (overwriting numeric cells, but C2:C3 have formulas).
-    let data: Vec<Vec<sheets_mcp::types::CellInput>> =
-        vec![vec!["5".into()], vec!["95".into()]];
+    let data: Vec<Vec<sheets_mcp::types::CellInput>> = vec![vec!["5".into()], vec!["95".into()]];
     update_cells(&src, None, "Sheet1", "B2", &data)
         .await
         .unwrap();
@@ -175,8 +174,14 @@ async fn update_cells_preserves_formulas_in_range() {
     // Check formulas are intact.
     let wb = umya_spreadsheet::reader::xlsx::read(&path).unwrap();
     let ws = wb.get_sheet_by_name("Sheet1").unwrap();
-    assert_eq!(ws.get_cell("C2").unwrap().get_value(), "=IF(B2>=90,\"A\",\"B\")");
-    assert_eq!(ws.get_cell("C3").unwrap().get_value(), "=IF(B3>=90,\"A\",\"B\")");
+    assert_eq!(
+        ws.get_cell("C2").unwrap().get_value(),
+        "=IF(B2>=90,\"A\",\"B\")"
+    );
+    assert_eq!(
+        ws.get_cell("C3").unwrap().get_value(),
+        "=IF(B3>=90,\"A\",\"B\")"
+    );
 }
 
 #[tokio::test]
@@ -250,7 +255,10 @@ async fn read_write_roundtrip() {
     let range = get_sheet_range(&src, "Sheet1", "A2:A2", false)
         .await
         .unwrap();
-    assert_eq!(range.rows[0][0].value, CellValue::String("Zara".to_string()));
+    assert_eq!(
+        range.rows[0][0].value,
+        CellValue::String("Zara".to_string())
+    );
 }
 
 #[tokio::test]

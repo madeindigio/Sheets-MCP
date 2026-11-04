@@ -13,11 +13,11 @@
 //! | `update_cell` | [`UpdateCellArgs`] |
 //! | `update_cells` | [`UpdateCellsArgs`] |
 
-use rmcp::{tool, tool_handler, tool_router};
 use rmcp::handler::server::{router::tool::ToolRouter, wrapper::Parameters};
-use rmcp::{ErrorData as McpError, ServerHandler, model::CallToolResult};
 use rmcp::model::Content;
 use rmcp::schemars::JsonSchema;
+use rmcp::{model::CallToolResult, ErrorData as McpError, ServerHandler};
+use rmcp::{tool, tool_handler, tool_router};
 use serde::Deserialize;
 
 use crate::file_source::FileSource;
@@ -76,9 +76,7 @@ fn default_first_n_rows() -> u32 {
     10
 }
 
-fn first_n_rows_schema(
-    _: &mut rmcp::schemars::SchemaGenerator,
-) -> rmcp::schemars::Schema {
+fn first_n_rows_schema(_: &mut rmcp::schemars::SchemaGenerator) -> rmcp::schemars::Schema {
     // Emit a plain non-negative integer schema to avoid client warnings
     // about unknown integer formats like "uint32".
     rmcp::schemars::json_schema!({
@@ -110,6 +108,9 @@ pub struct GetSheetRangeArgs {
     /// If `true`, include cell formatting (slower).
     #[serde(default)]
     pub include_format: bool,
+    /// If `true`, include formula text for formula cells.
+    #[serde(default)]
+    pub include_formula: bool,
 }
 
 /// Arguments for the `update_cell` tool.
@@ -153,7 +154,9 @@ pub struct UpdateCellsArgs {
 
 #[tool_router(router = tool_router)]
 impl SheetsServer {
-    #[tool(description = "Returns the structure of a workbook: sheet names, dimensions, and the first N rows with values and formatting (colors, fonts, borders). Use this to understand the spreadsheet layout and identify cells by appearance (e.g., 'the gray cells'). Accepts a file_path or url.")]
+    #[tool(
+        description = "Returns the structure of a workbook: sheet names, dimensions, and the first N rows with values and formatting (colors, fonts, borders). Use this to understand the spreadsheet layout and identify cells by appearance (e.g., 'the gray cells'). Accepts a file_path or url."
+    )]
     async fn read_structure(
         &self,
         Parameters(args): Parameters<ReadStructureArgs>,
@@ -166,7 +169,9 @@ impl SheetsServer {
         Ok(CallToolResult::success(vec![Content::text(json)]))
     }
 
-    #[tool(description = "Returns the total number of rows and columns in a specific sheet. Accepts a file_path or url.")]
+    #[tool(
+        description = "Returns the total number of rows and columns in a specific sheet. Accepts a file_path or url."
+    )]
     async fn count_sheet_rows(
         &self,
         Parameters(args): Parameters<CountSheetRowsArgs>,
@@ -179,18 +184,25 @@ impl SheetsServer {
         Ok(CallToolResult::success(vec![Content::text(json)]))
     }
 
-    #[tool(description = "Returns cell values from a given range (e.g., 'A1:D100'). Set include_format=true to also get colors, fonts, and borders for each cell. Accepts a file_path or url.")]
+    #[tool(
+        description = "Returns cell values from a given range (e.g., 'A1:D100'). Set include_format=true to also get formatting, or include_formula=true to include formula text. Accepts a file_path or url."
+    )]
     async fn get_sheet_range(
         &self,
         Parameters(args): Parameters<GetSheetRangeArgs>,
     ) -> Result<CallToolResult, McpError> {
-        let _range: CellRange = args.range.parse::<CellRange>()
-            .map_err(|e: crate::error::SheetsError| McpError::invalid_params(e.to_string(), None))?;
-        let data = reader::get_sheet_range(
+        let _range: CellRange =
+            args.range
+                .parse::<CellRange>()
+                .map_err(|e: crate::error::SheetsError| {
+                    McpError::invalid_params(e.to_string(), None)
+                })?;
+        let data = reader::get_sheet_range_with_options(
             &args.source,
             &args.sheet_name,
             &args.range,
             args.include_format,
+            args.include_formula,
         )
         .await
         .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
@@ -199,7 +211,9 @@ impl SheetsServer {
         Ok(CallToolResult::success(vec![Content::text(json)]))
     }
 
-    #[tool(description = "Updates a single cell's value. Preserves all existing formulas and formatting. Accepts a file_path or url. If using a URL, provide output_path to save the modified file.")]
+    #[tool(
+        description = "Updates a single cell's value. Preserves all existing formulas and formatting. Accepts a file_path or url. If using a URL, provide output_path to save the modified file."
+    )]
     async fn update_cell(
         &self,
         Parameters(args): Parameters<UpdateCellArgs>,
@@ -219,7 +233,9 @@ impl SheetsServer {
         Ok(CallToolResult::success(vec![Content::text(json)]))
     }
 
-    #[tool(description = "Pastes a 2D array of values starting at a destination cell. Preserves all existing formulas and formatting. Accepts a file_path or url. If using a URL, provide output_path to save the modified file.")]
+    #[tool(
+        description = "Pastes a 2D array of values starting at a destination cell. Preserves all existing formulas and formatting. Accepts a file_path or url. If using a URL, provide output_path to save the modified file."
+    )]
     async fn update_cells(
         &self,
         Parameters(args): Parameters<UpdateCellsArgs>,

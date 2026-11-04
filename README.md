@@ -169,9 +169,9 @@ Output:
 
 ### 3. `get_sheet_range`
 
-Get cell values from a range. Optionally includes formatting.
+Get cell values from a range. Optionally includes formatting and formula text.
 
-For `.xls` files, `get_sheet_range` is **values-only**. Formatting metadata is not supported for legacy `.xls` workbooks.
+For `.xls` files, `get_sheet_range` is **values-only**. Formatting and formula metadata are not supported for legacy `.xls` workbooks.
 
 ```
 Input:
@@ -179,11 +179,13 @@ Input:
   sheet_name: "Sheet1"
   range: "A1:D100"
   include_format: false                  (default: false, for speed)
+  include_formula: false                 (default: false, for speed)
 
 Output (include_format: false):
 {
   "sheet_name": "Sheet1",
   "range": "A1:D100",
+  "formulas_included": false,
   "rows": [
     [
       { "value": { "type": "String", "value": "Name" } },
@@ -197,6 +199,7 @@ Output (include_format: true):
 {
   "sheet_name": "Sheet1",
   "range": "A1:D100",
+  "formulas_included": false,
   "rows": [
     [
       {
@@ -214,7 +217,12 @@ Output (include_format: true):
 }
 ```
 
-**Use this when**: You need a specific subset of cells. Use `include_format: false` (fast) for values-only reads. Use `include_format: true` only when you need colors/fonts.
+Output with `include_formula: true` additionally sets `formulas_included: true`
+and includes a `formula` string (without a leading `=`) on formula cells. Formula
+inspection uses the `.xlsx` reader even when `include_format` is false, so it is
+slower than the values-only path. For `.xls`, `formulas_included` remains false.
+
+**Use this when**: You need a specific subset of cells. Use `include_format: false` and `include_formula: false` (the defaults) for fast values-only reads. Enable either option only when needed.
 
 ---
 

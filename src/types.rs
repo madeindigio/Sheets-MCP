@@ -71,11 +71,7 @@ impl FromStr for CellCoordinate {
         let split = s
             .char_indices()
             .find(|(_, c)| c.is_ascii_digit())
-            .ok_or_else(|| {
-                SheetsError::InvalidCoordinate(format!(
-                    "'{s}' has no row number"
-                ))
-            })?;
+            .ok_or_else(|| SheetsError::InvalidCoordinate(format!("'{s}' has no row number")))?;
 
         let (col_part, row_part) = s.split_at(split.0);
 
@@ -87,9 +83,7 @@ impl FromStr for CellCoordinate {
 
         let col_index = letter_to_col_index(col_part)?;
         let row: u32 = row_part.parse().map_err(|_| {
-            SheetsError::InvalidCoordinate(format!(
-                "'{s}' has an invalid row number"
-            ))
+            SheetsError::InvalidCoordinate(format!("'{s}' has an invalid row number"))
         })?;
 
         if row == 0 {
@@ -199,21 +193,13 @@ impl FromStr for CellRange {
         };
 
         let colon = range_part.find(':').ok_or_else(|| {
-            SheetsError::InvalidCoordinate(format!(
-                "Range '{s}' must contain ':'"
-            ))
+            SheetsError::InvalidCoordinate(format!("Range '{s}' must contain ':'"))
         })?;
 
-        let start =
-            CellCoordinate::from_str(&range_part[..colon])?;
-        let end =
-            CellCoordinate::from_str(&range_part[colon + 1..])?;
+        let start = CellCoordinate::from_str(&range_part[..colon])?;
+        let end = CellCoordinate::from_str(&range_part[colon + 1..])?;
 
-        Ok(CellRange {
-            sheet,
-            start,
-            end,
-        })
+        Ok(CellRange { sheet, start, end })
     }
 }
 
@@ -353,6 +339,9 @@ pub struct RangeCell {
     /// Cell formatting (only present when `include_format = true`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub format: Option<CellFormat>,
+    /// Formula without a leading `=` (only present when `include_formula = true`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub formula: Option<String>,
 }
 
 /// Response for [`get_sheet_range`](crate::reader::get_sheet_range).
@@ -362,6 +351,9 @@ pub struct RangeData {
     pub sheet_name: String,
     /// The range string (e.g. `"A1:D100"`).
     pub range: String,
+    /// Whether formula metadata was requested and populated where present.
+    #[serde(default)]
+    pub formulas_included: bool,
     /// 2D array of cells (row-major order).
     pub rows: Vec<Vec<RangeCell>>,
 }
