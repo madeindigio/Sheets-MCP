@@ -7,7 +7,7 @@ See `.plan/` for the full phased implementation plan.
 
 A high-performance MCP (Model Context Protocol) server for reading and writing Excel spreadsheets, built in Rust. Communicates via stdio JSON-RPC with LLM clients.
 
-**5 MCP tools**: `read_structure`, `count_sheet_rows`, `get_sheet_range`, `update_cell`, `update_cells`
+**6 MCP tools**: `read_structure`, `count_sheet_rows`, `get_sheet_range`, `update_cell`, `update_cells`, `insert_rows`
 
 ## Architecture
 
@@ -46,6 +46,7 @@ src/
 ├── file_source.rs   # FileSource enum (Path/Url), resolve(), write_target(), download+cache
 ├── reader.rs        # read_structure(), count_sheet_rows(), get_sheet_range()
 ├── writer.rs        # update_cell(), update_cells()
+├── rows.rs          # insert_rows(), shift_formula_rows()
 └── tools.rs         # #[tool] handlers for rmcp, Serde input structs
 ```
 

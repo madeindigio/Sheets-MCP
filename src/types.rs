@@ -375,6 +375,25 @@ pub struct UpdateResult {
     pub columns: Option<u32>,
 }
 
+/// Response for [`insert_rows`](crate::rows::insert_rows).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InsertRowsResult {
+    /// Name of the sheet that was modified.
+    pub sheet_name: String,
+    /// Path to the output file (where the result was written).
+    pub output_path: String,
+    /// Number of rows inserted.
+    pub inserted_rows: u32,
+    /// First inserted row (1-based).
+    pub first_new_row: u32,
+    /// Last inserted row (1-based).
+    pub last_new_row: u32,
+    /// Cells that received the template row's style.
+    pub cells_copied: u32,
+    /// Formulas copied from the template row, with shifted row references.
+    pub formulas_copied: u32,
+}
+
 /// Convert an umya-spreadsheet ARGB u32 to a hex string like `"#FF0000"`.
 ///
 /// Strips the alpha byte and returns `None` if the input is zero (no color).

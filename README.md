@@ -4,7 +4,7 @@ A high-performance MCP server for reading and writing Excel spreadsheets, built 
 
 ## Features
 
-- **5 MCP tools** — `read_structure`, `count_sheet_rows`, `get_sheet_range`, `update_cell`, `update_cells`
+- **6 MCP tools** — `read_structure`, `count_sheet_rows`, `get_sheet_range`, `update_cell`, `update_cells`, `insert_rows`
 - **Local files & URLs** — pass a `file_path` or a `url`, the MCP handles the rest
 - **Formatting-aware** — read cell colors, fonts, borders; write without destroying them
 - **Formula-safe** — updating cell values never touches formulas in other cells
@@ -293,6 +293,37 @@ Before:           After:
 ```
 
 **Same guarantees as `update_cell`** — formulas and formatting preserved everywhere.
+
+---
+
+### 6. `insert_rows`
+
+Insert rows after a row, giving each new row the format, height and formulas of a template row. Use it before `update_cells` when a template has fewer pre-formatted rows than the data.
+
+```
+Input:
+  file_path: "/home/user/trips.xlsx"
+  sheet_name: "Viajes y Dietas"
+  after_row: 11            (new rows start at 12)
+  count: 12
+  copy_from_row: 11        (optional; defaults to after_row, must not be below it)
+  output_path: "..."       (optional; required if source is a URL)
+
+Output:
+{
+  "sheet_name": "Viajes y Dietas",
+  "output_path": "/home/user/trips.xlsx",
+  "inserted_rows": 12,
+  "first_new_row": 12,
+  "last_new_row": 23,
+  "cells_copied": 324,
+  "formulas_copied": 60
+}
+```
+
+- Formulas are copied with relative row references shifted to the new row (`O11*0.19` → `O12*0.19`); absolute rows (`$7`), text and quoted sheet names are kept.
+- Everything below the insertion point (cells, merged ranges, drawings such as note text boxes, comments, conditional formats and references to it) moves down, as when rows are inserted in Excel.
+- `.xls` files use the same LibreOffice round trip as `update_cells`.
 
 ---
 

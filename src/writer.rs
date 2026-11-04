@@ -75,6 +75,7 @@ pub async fn update_cell(
         let sheet = workbook
             .get_sheet_by_name_mut(sheet_name)
             .ok_or_else(|| SheetsError::sheet_not_found(sheet_name, &sheet_names))?;
+        prepare_formulas(sheet);
 
         // Get mutable cell and set value.
         let cell = sheet.get_cell_mut(cell_ref.as_str());
@@ -195,6 +196,7 @@ pub async fn update_cells(
         let sheet = workbook
             .get_sheet_by_name_mut(sheet_name)
             .ok_or_else(|| SheetsError::sheet_not_found(sheet_name, &sheet_names))?;
+        prepare_formulas(sheet);
 
         for (r, row_data) in data.iter().enumerate() {
             for (c, input) in row_data.iter().enumerate() {
@@ -245,7 +247,7 @@ pub async fn update_cells(
 ///
 /// `f` performs the actual umya read-modify-write and must not assume
 /// anything about the final output format.
-async fn with_xlsx_roundtrip<F>(
+pub(crate) async fn with_xlsx_roundtrip<F>(
     input_path: &Path,
     output_path: &Path,
     f: F,
@@ -430,11 +432,57 @@ async fn run_soffice_bin(bin: &str, args: &[String]) -> Result<(), SheetsError> 
     Ok(())
 }
 
+/// Prepares the formulas of a sheet that is about to be written:
+/// - every shared formula becomes an ordinary formula with its resolved text:
+///   a shared formula's followers only point at its first cell, so
+///   overwriting that cell with a value (or moving rows) would leave them
+///   empty;
+/// - cached results are dropped, so Excel and LibreOffice recompute every
+///   formula on open instead of showing results computed before the write.
+///
+/// Array and data-table formulas are left as they are. Returns the number of
+/// formulas prepared.
+pub(crate) fn prepare_formulas(sheet: &mut umya_spreadsheet::Worksheet) -> u32 {
+    use umya_spreadsheet::structs::{CellFormula, CellFormulaValues};
+    // (column, row, resolved text of a shared formula, ordinary formula)
+    let formulas: Vec<(u32, u32, String, Option<CellFormula>)> = sheet
+        .get_cell_collection()
+        .iter()
+        .filter_map(|cell| {
+            let formula = cell.get_formula_obj()?;
+            let coordinate = cell.get_coordinate();
+            let (column, row) = (*coordinate.get_col_num(), *coordinate.get_row_num());
+            match formula.get_formula_type() {
+                CellFormulaValues::Shared => {
+                    Some((column, row, cell.get_formula().to_string(), None))
+                }
+                CellFormulaValues::Normal => {
+                    Some((column, row, String::new(), Some(formula.clone())))
+                }
+                _ => None,
+            }
+        })
+        .collect();
+    for (column, row, text, ordinary) in &formulas {
+        let cell = sheet.get_cell_mut((*column, *row));
+        cell.set_blank();
+        match ordinary {
+            Some(formula) => {
+                cell.get_cell_value_mut().set_formula_obj(formula.clone());
+            }
+            None => {
+                cell.set_formula(text.clone());
+            }
+        }
+    }
+    formulas.len() as u32
+}
+
 /// Read an `.xlsx` file using umya-spreadsheet for writing.
 ///
 /// Returns the full spreadsheet DOM. The caller modifies cells
 /// and then writes back with [`write_umya`].
-fn read_umya_writable(
+pub(crate) fn read_umya_writable(
     path: &Path,
 ) -> Result<umya_spreadsheet::Spreadsheet, SheetsError> {
     umya_spreadsheet::reader::xlsx::read(path)
@@ -444,7 +492,7 @@ fn read_umya_writable(
 /// Write the workbook back to disk using umya-spreadsheet.
 ///
 /// Ensures the parent directory exists before writing.
-fn write_umya(
+pub(crate) fn write_umya(
     workbook: &umya_spreadsheet::Spreadsheet,
     path: &Path,
 ) -> Result<(), SheetsError> {

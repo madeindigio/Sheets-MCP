@@ -12,6 +12,7 @@
 //! | `get_sheet_range` | [`GetSheetRangeArgs`] |
 //! | `update_cell` | [`UpdateCellArgs`] |
 //! | `update_cells` | [`UpdateCellsArgs`] |
+//! | `insert_rows` | [`InsertRowsArgs`] |
 
 use rmcp::handler::server::{router::tool::ToolRouter, wrapper::Parameters};
 use rmcp::model::Content;
@@ -22,6 +23,7 @@ use serde::Deserialize;
 
 use crate::file_source::FileSource;
 use crate::reader;
+use crate::rows;
 use crate::types::CellRange;
 use crate::writer;
 
@@ -148,6 +150,25 @@ pub struct UpdateCellsArgs {
     pub output_path: Option<String>,
 }
 
+/// Arguments for the `insert_rows` tool.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct InsertRowsArgs {
+    /// File source: either `file_path` or `url`.
+    #[serde(flatten)]
+    pub source: FileSource,
+    /// Name of the sheet.
+    pub sheet_name: String,
+    /// 1-based row after which the new rows are inserted.
+    pub after_row: u32,
+    /// Number of rows to insert.
+    pub count: u32,
+    /// 1-based row whose format and formulas the new rows copy; defaults to
+    /// `after_row` and must not be below it.
+    pub copy_from_row: Option<u32>,
+    /// Output path (required when source is a URL).
+    pub output_path: Option<String>,
+}
+
 // ──────────────────────────────────────────────
 // Tool implementations
 // ──────────────────────────────────────────────
@@ -246,6 +267,28 @@ impl SheetsServer {
             &args.sheet_name,
             &args.destination,
             &args.data,
+        )
+        .await
+        .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+        let json = serde_json::to_string_pretty(&result)
+            .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+        Ok(CallToolResult::success(vec![Content::text(json)]))
+    }
+
+    #[tool(
+        description = "Inserts rows after a row of a sheet, copying a template row's format, height and formulas (relative row references shifted to each new row). Rows, merged ranges, drawings and references below the insertion point move down. Use it before update_cells when a template has fewer pre-formatted rows than the data. Accepts a file_path or url; with a URL, provide output_path."
+    )]
+    async fn insert_rows(
+        &self,
+        Parameters(args): Parameters<InsertRowsArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let result = rows::insert_rows(
+            &args.source,
+            args.output_path.as_deref(),
+            &args.sheet_name,
+            args.after_row,
+            args.count,
+            args.copy_from_row,
         )
         .await
         .map_err(|e| McpError::invalid_params(e.to_string(), None))?;

@@ -15,7 +15,7 @@
 //! One write path:
 //! - **umya-spreadsheet**: Read-modify-write for `.xlsx`. Preserves formulas and formatting.
 //!
-//! ## MCP Tools (5)
+//! ## MCP Tools (6)
 //!
 //! | Tool | Description |
 //! |------|-------------|
@@ -24,10 +24,12 @@
 //! | `get_sheet_range` | Cell values from a range |
 //! | `update_cell` | Update a single cell value |
 //! | `update_cells` | Paste a 2D array of values |
+//! | `insert_rows` | Insert rows copying a template row's format and formulas |
 
 pub mod error;
 pub mod file_source;
 pub mod reader;
+pub mod rows;
 pub mod types;
 pub mod tools;
 pub mod writer;
