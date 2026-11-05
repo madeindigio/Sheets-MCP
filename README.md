@@ -4,7 +4,7 @@ A high-performance MCP server for reading and writing Excel spreadsheets, built 
 
 ## Features
 
-- **6 MCP tools** — `read_structure`, `count_sheet_rows`, `get_sheet_range`, `update_cell`, `update_cells`, `insert_rows`
+- **7 MCP tools** — `read_structure`, `count_sheet_rows`, `get_sheet_range`, `update_cell`, `update_cells`, `insert_rows`, `read_template_metadata`
 - **Local files & URLs** — pass a `file_path` or a `url`, the MCP handles the rest
 - **Formatting-aware** — read cell colors, fonts, borders; write without destroying them
 - **Formula-safe** — updating cell values never touches formulas in other cells
@@ -324,6 +324,34 @@ Output:
 - Formulas are copied with relative row references shifted to the new row (`O11*0.19` → `O12*0.19`); absolute rows (`$7`), text and quoted sheet names are kept.
 - Everything below the insertion point (cells, merged ranges, drawings such as note text boxes, comments, conditional formats and references to it) moves down, as when rows are inserted in Excel.
 - `.xls` files use the same LibreOffice round trip as `update_cells`.
+
+---
+
+### 7. `read_template_metadata`
+
+Return what cell reads do not show in a template: the text of drawing text boxes (column notes printed in a shape), cell comments and merged ranges.
+
+```
+Input:
+  file_path: "/home/user/template.xlsx"
+  sheet_name: "Viajes y Dietas"   (optional; all sheets when omitted)
+
+Output:
+{
+  "sheets": [{
+    "sheet_name": "Viajes y Dietas",
+    "notes_available": true,
+    "drawing_notes": [{ "anchor": "A13",
+                        "paragraphs": ["(3) Tipo de gasto: Debe elegir entre las opciones:", " · Viajes y dietas ", "..."] }],
+    "comments": [{ "cell": "C5", "text": "..." }],
+    "merged": ["A5:A6", "N4:Z4"]
+  }]
+}
+```
+
+- One entry per text box, with its paragraphs in order (empty paragraphs kept, so callers can split numbered notes); `anchor` is the shape's top-left cell, `null` for absolute anchors.
+- Notes are read from the `.xlsx` parts directly, so grouped shapes and plain-text comments are included.
+- Legacy `.xls` files return their sheet names with `notes_available: false`.
 
 ---
 

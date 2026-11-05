@@ -13,6 +13,7 @@
 //! | `update_cell` | [`UpdateCellArgs`] |
 //! | `update_cells` | [`UpdateCellsArgs`] |
 //! | `insert_rows` | [`InsertRowsArgs`] |
+//! | `read_template_metadata` | [`ReadTemplateMetadataArgs`] |
 
 use rmcp::handler::server::{router::tool::ToolRouter, wrapper::Parameters};
 use rmcp::model::Content;
@@ -22,6 +23,7 @@ use rmcp::{tool, tool_handler, tool_router};
 use serde::Deserialize;
 
 use crate::file_source::FileSource;
+use crate::metadata;
 use crate::reader;
 use crate::rows;
 use crate::types::CellRange;
@@ -169,6 +171,16 @@ pub struct InsertRowsArgs {
     pub output_path: Option<String>,
 }
 
+/// Arguments for the `read_template_metadata` tool.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct ReadTemplateMetadataArgs {
+    /// File source: either `file_path` or `url`.
+    #[serde(flatten)]
+    pub source: FileSource,
+    /// Only this sheet; all sheets when omitted.
+    pub sheet_name: Option<String>,
+}
+
 // ──────────────────────────────────────────────
 // Tool implementations
 // ──────────────────────────────────────────────
@@ -292,6 +304,21 @@ impl SheetsServer {
         )
         .await
         .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+        let json = serde_json::to_string_pretty(&result)
+            .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+        Ok(CallToolResult::success(vec![Content::text(json)]))
+    }
+
+    #[tool(
+        description = "Returns what cell reads do not show in a template, per sheet: the paragraphs of each drawing text box (for example column notes printed in a shape) with the cell it is anchored to, cell comments, and merged ranges. Legacy .xls files return notes_available=false. Accepts a file_path or url."
+    )]
+    async fn read_template_metadata(
+        &self,
+        Parameters(args): Parameters<ReadTemplateMetadataArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let result = metadata::read_template_metadata(&args.source, args.sheet_name.as_deref())
+            .await
+            .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
         let json = serde_json::to_string_pretty(&result)
             .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
         Ok(CallToolResult::success(vec![Content::text(json)]))

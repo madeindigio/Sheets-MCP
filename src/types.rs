@@ -649,3 +649,38 @@ impl From<String> for CellInput {
         CellInput::Text(value)
     }
 }
+
+/// Response for [`read_template_metadata`](crate::metadata::read_template_metadata).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TemplateMetadata {
+    pub sheets: Vec<SheetTemplateMetadata>,
+}
+
+/// Notes and merged ranges of one sheet.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SheetTemplateMetadata {
+    pub sheet_name: String,
+    /// False for formats whose notes cannot be read (legacy `.xls`).
+    pub notes_available: bool,
+    /// Text boxes of the sheet's drawing, in anchor order.
+    pub drawing_notes: Vec<TemplateDrawingNote>,
+    /// Cell comments (notes attached to a cell).
+    pub comments: Vec<TemplateComment>,
+    /// Merged ranges, e.g. `"A5:A6"`.
+    pub merged: Vec<String>,
+}
+
+/// One drawing text box: its paragraphs in order (empty lines included).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TemplateDrawingNote {
+    /// Top-left cell of the shape's anchor, e.g. `"A13"`; null when absolute.
+    pub anchor: Option<String>,
+    pub paragraphs: Vec<String>,
+}
+
+/// A cell comment.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TemplateComment {
+    pub cell: String,
+    pub text: String,
+}

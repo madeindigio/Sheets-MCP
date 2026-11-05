@@ -1516,6 +1516,7 @@ dependencies = [
  "anyhow",
  "calamine",
  "chrono",
+ "quick-xml 0.37.5",
  "reqwest",
  "rmcp",
  "schemars",
@@ -1526,6 +1527,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "umya-spreadsheet",
+ "zip",
 ]
 
 [[package]]
